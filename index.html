@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>韻踏みゲーム</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      font-family: sans-serif;
+      max-width: 600px;
+      margin: auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    input, button {
+      font-size: 1.2em;
+      padding: 10px;
+      margin: 10px 0;
+    }
+    #answerInput {
+      width: 100%;
+    }
+    #result {
+      margin-top: 15px;
+      font-size: 1.1em;
+      font-weight: bold;
+    }
+    .highlight {
+      background: #fef3c7;
+      padding: 3px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+    .match {
+      color: red;
+      font-weight: bold;
+    }
+
+    /* ボタングループ */
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      margin: 10px 0;
+    }
+
+    .btn-group button {
+      flex: 1;
+    }
+
+    /* スマホ版：縦並び */
+    @media (max-width: 600px) {
+      .btn-group {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>韻踏みゲーム</h1>
+  <div id="question">読み込み中...</div>
+  <input type="text" id="answerInput" placeholder="単語を入力（ひらがな・カタカナOK）" autocomplete="off" />
+  <div class="btn-group">
+    <button id="checkBtn" onclick="checkAnswer()">判定</button>
+    <button id="skipBtn" onclick="newRound()">スキップ</button>
+  </div>
+  <div id="result"></div>
+
+  <script>
+    const apiUrl = '';
+
+    let words = [];
+    let currentWord = null;
+    let currentVowels = '';
+    let timeoutId = null;
+
+    const dakutenMap = {
+      'が':'か','ぎ':'き','ぐ':'く','げ':'け','ご':'こ',
+      'ざ':'さ','じ':'し','ず':'す','ぜ':'せ','ぞ':'そ',
+      'だ':'た','ぢ':'ち','づ':'つ','で':'て','ど':'と',
+      'ば':'は','び':'ひ','ぶ':'ふ','べ':'へ','ぼ':'ほ',
+      'ぱ':'は','ぴ':'ひ','ぷ':'ふ','ぺ':'へ','ぽ':'ほ'
+    };
+
+    const kanaToVowel = {
+      'あ':'あ','い':'い','う':'う','え':'え','お':'お',
+      'か':'あ','き':'い','く':'う','け':'え','こ':'お',
+      'さ':'あ','し':'い','す':'う','せ':'え','そ':'お',
+      'た':'あ','ち':'い','つ':'う','て':'え','と':'お',
+      'な':'あ','に':'い','ぬ':'う','ね':'え','の':'お',
+      'は':'あ','ひ':'い','ふ':'う','へ':'え','ほ':'お',
+      'ま':'あ','み':'い','む':'う','め':'え','も':'お',
+      'や':'あ','ゆ':'う','よ':'お',
+      'ら':'あ','り':'い','る':'う','れ':'え','ろ':'お',
+      'わ':'あ','を':'お','ん':'_','っ':'_'
+    };
+
+    const youonMap = {
+      'きゃ':'あ','きゅ':'う','きょ':'お','しゃ':'あ','しゅ':'う','しょ':'お',
+      'ちゃ':'あ','ちゅ':'う','ちょ':'お','にゃ':'あ','にゅ':'う','にょ':'お',
+      'ひゃ':'あ','ひゅ':'う','ひょ':'お','みゃ':'あ','みゅ':'う','みょ':'お',
+      'りゃ':'あ','りゅ':'う','りょ':'お','ぎゃ':'あ','ぎゅ':'う','ぎょ':'お',
+      'じゃ':'あ','じゅ':'う','じょ':'お','びゃ':'あ','びゅ':'う','びょ':'お',
+      'ぴゃ':'あ','ぴゅ':'う','ぴょ':'お','じぇ':'え','しぇ':'え','ちぇ':'え',
+      'てぃ':'い','でぃ':'い','ふぁ':'あ','ふぃ':'い','ふぇ':'え','ふぉ':'お',
+      'うぃ':'い','うぇ':'え','うぉ':'お','つぃ':'い','ヴぁ':'あ','ヴぃ':'い',
+      'ヴぇ':'え','ヴぉ':'お'
+    };
+
+    const smallToLarge = {'ぁ':'あ','ぃ':'い','ぅ':'う','ぇ':'え','ぉ':'お'};
+
+    function toHiragana(str) {
+      return str.replace(/[\u30a1-\u30f6]/g, ch =>
+        String.fromCharCode(ch.charCodeAt(0) - 0x60)
+      );
+    }
+
+    function extractVowels(str) {
+      str = toHiragana(str);
+      let result = '';
+      let lastVowel = '';
+      const chars = [...str];
+
+      for (let i = 0; i < chars.length; i++) {
+        let c = dakutenMap[chars[i]] || chars[i];
+        if (smallToLarge[c]) c = smallToLarge[c];
+
+        const next = chars[i + 1];
+        const pair = next ? c + next : null;
+
+        if (c === 'っ' || c === 'ん') {
+          result += '_';
+          continue;
+        }
+
+        if (c === 'ー') {
+          result += lastVowel;
+          continue;
+        }
+
+        if (pair && youonMap[pair]) {
+          lastVowel = youonMap[pair];
+          result += lastVowel;
+          i++;
+          continue;
+        }
+
+        const vowel = kanaToVowel[c] || '';
+        if (vowel) {
+          lastVowel = vowel;
+          result += vowel;
+        }
+      }
+
+      return result;
+    }
+
+    function highlightMatch(text, index, len) {
+      return text.slice(0, index) +
+        '<span class="match">' +
+        text.slice(index, index + len) +
+        '</span>' +
+        text.slice(index + len);
+    }
+
+    function compareVowels(base, target) {
+      if (base === target) return { match: 'perfect', rate: 1.0 };
+
+      const indexFull = target.indexOf(base);
+      if (indexFull !== -1) {
+        return { match: 'contains-perfect', rate: 1.0, index: indexFull, len: base.length };
+      }
+
+      for (let len = base.length; len >= 2; len--) {
+        for (let i = 0; i <= target.length - len; i++) {
+          const sub = target.slice(i, i + len);
+          const rate = len / base.length;
+          if (rate >= 0.8) {
+            return { match: 'contains-partial', rate, index: i, len };
+          }
+        }
+      }
+
+      return { match: 'none', rate: 0 };
+    }
+
+    function checkAnswer() {
+      if (timeoutId !== null) return;
+
+      const answer = document.getElementById('answerInput').value.trim();
+      if (!answer) return alert('単語を入力してください');
+
+      const answerVowels = extractVowels(answer);
+      const res = compareVowels(currentVowels, answerVowels);
+      let message = '';
+
+      switch (res.match) {
+        case 'perfect':
+          message = `✅ 完踏み！<br>🔸母音: <span class="highlight">${currentVowels}</span>`;
+          break;
+        case 'contains-perfect':
+          const full = highlightMatch(answerVowels, res.index, res.len);
+          message = `🔸完踏み部分あり<br>🔸一致率: 100%<br>あなたの母音: ${full}`;
+          break;
+        case 'contains-partial':
+          const partial = highlightMatch(answerVowels, res.index, res.len);
+          message = `🔸韻を踏んでる (${Math.round(res.rate * 100)}%)<br>母音: ${partial}`;
+          break;
+        default:
+          message = `❌ 韻を踏んでいません<br>あなたの母音: <span class="highlight">${answerVowels}</span>`;
+      }
+
+      document.getElementById('result').innerHTML = message;
+
+      if (res.rate >= 0.8) {
+        document.getElementById('checkBtn').disabled = true;
+        document.getElementById('skipBtn').disabled = true;
+        timeoutId = setTimeout(() => {
+          timeoutId = null;
+          document.getElementById('checkBtn').disabled = false;
+          document.getElementById('skipBtn').disabled = false;
+          newRound();
+        }, 4000);
+      }
+    }
+
+    function newRound() {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (words.length === 0) return;
+      currentWord = words[Math.floor(Math.random() * words.length)];
+      currentVowels = extractVowels(currentWord.reading);
+      document.getElementById('question').textContent = `▶ お題: ${currentWord.kanji}`;
+      document.getElementById('answerInput').value = '';
+      document.getElementById('result').textContent = '';
+      document.getElementById('answerInput').focus();
+
+      document.getElementById('checkBtn').disabled = false;
+      document.getElementById('skipBtn').disabled = false;
+    }
+
+    fetch(apiUrl)
+      .then(res => res.json())
+      .then(data => {
+        words = data;
+        newRound();
+      })
+      .catch(err => {
+        document.getElementById('question').textContent = '単語の読み込みに失敗しました';
+        console.error(err);
+      });
+
+    document.getElementById('answerInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') checkAnswer();
+    });
+  </script>
+</body>
+</html>
